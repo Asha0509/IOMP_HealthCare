@@ -18,6 +18,25 @@ This project includes a comprehensive medical dataset for disease prediction:
 | **Disease Classes** | 721 |
 | **Dataset File** | `Final_Augmented_dataset_Diseases_and_Symptoms.csv` |
 
+#### Download Dataset from Kaggle
+
+The dataset is too large for GitHub. Download it using KaggleHub:
+
+```bash
+pip install kagglehub
+```
+
+```python
+import kagglehub
+
+# Download latest version
+path = kagglehub.dataset_download("dhivyeshrk/diseases-and-symptoms-dataset")
+
+print("Path to dataset files:", path)
+```
+
+Then copy `Final_Augmented_dataset_Diseases_and_Symptoms.csv` to the project root folder.
+
 ### Trained ML Model
 A Random Forest classifier trained on the dataset:
 
