@@ -72,10 +72,7 @@ export default function Login() {
                 </form>
 
                 <p style={{ textAlign: 'center', marginTop: 24, fontSize: '0.88rem', color: 'var(--text-muted)' }}>
-                    Don't have an account?{' '}
-                    <Link to="/register" style={{ color: 'var(--accent-teal)', textDecoration: 'none', fontWeight: 600 }}>
-                        Sign up free
-                    </Link>
+                    {/* Create account link removed */}
                 </p>
             </div>
         </div>

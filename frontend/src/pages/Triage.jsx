@@ -54,6 +54,7 @@ export default function Triage() {
     const [patientGender, setPatientGender] = useState('')
     const [language, setLanguage] = useState('en')
     const [listening, setListening] = useState(false)
+    const [answered, setAnswered] = useState({}) // Track answered questions
     const chatRef = useRef(null)
     const navigate = useNavigate()
 
@@ -104,6 +105,7 @@ export default function Triage() {
             setSessionId(data.session_id)
             setSymptoms(data.extracted_symptoms || [])
             setProgress(data.progress_percent || 0)
+            setAnswered({}) // Reset answered on new session
 
             if (data.status === 'completed') {
                 addMessage('ai', data.message || 'Assessment complete. Fetching your result...')
@@ -141,10 +143,16 @@ export default function Triage() {
         setLoading(true)
 
         try {
+            // Update answered state before sending
+            const updatedAnswered = { ...answered, [currentQuestion.question_id]: answer }
+            setAnswered(updatedAnswered)
+
             const { data } = await triageAPI.answer({
                 session_id: sessionId,
                 question_id: currentQuestion.question_id,
                 answer,
+                // Optionally send all answered questions for backend validation (if backend supports it)
+                // answered: updatedAnswered,
             })
 
             setProgress(data.progress_percent || 0)

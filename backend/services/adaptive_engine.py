@@ -109,23 +109,15 @@ def get_questions_for_symptoms(symptoms: List[str], chief_complaint: str = "") -
     seen_ids = set()
     
     # Convert symptoms and chief complaint to searchable terms
+    # Build a set of all synonyms for all symptoms
+    kg = _get_kg()
     symptom_terms = set()
     for s in symptoms:
+        node = kg.get(s, {})
+        # Add canonical name and all synonyms
         symptom_terms.add(s.replace("_", " ").lower())
-        # Add common variations
-        if s == "fever":
-            symptom_terms.update(["fever", "temperature", "hot", "feverish"])
-        elif s == "nausea_vomiting":
-            symptom_terms.update(["nausea", "vomiting", "nauseous", "vomit", "throwing up"])
-        elif s == "headache":
-            symptom_terms.update(["headache", "head pain", "head ache", "head hurts"])
-        elif s == "shortness_of_breath":
-            symptom_terms.update(["breath", "breathing", "breathless", "short of breath"])
-        elif s == "cough":
-            symptom_terms.update(["cough", "coughing"])
-        elif s == "body_pain":
-            symptom_terms.update(["body pain", "body ache", "body aches", "body hurts", "aching"])
-    
+        for syn in node.get("synonyms", []):
+            symptom_terms.add(syn.lower())
     # Also extract terms from chief complaint
     if chief_complaint:
         complaint_lower = chief_complaint.lower()

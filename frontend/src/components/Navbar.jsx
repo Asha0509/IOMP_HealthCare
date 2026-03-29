@@ -45,22 +45,7 @@ export default function Navbar() {
                         <Clock size={15} /> History
                     </Link>
                 )}
-                {user ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                            {user.name}
-                        </span>
-                        <button className="btn btn-secondary" onClick={handleLogout}
-                            style={{ padding: '8px 16px', fontSize: '0.8rem' }}>
-                            <LogOut size={14} /> Logout
-                        </button>
-                    </div>
-                ) : (
-                    <div style={{ display: 'flex', gap: 8 }}>
-                        <Link to="/login" className="btn btn-secondary" style={{ padding: '8px 20px', fontSize: '0.85rem' }}>Login</Link>
-                        <Link to="/register" className="btn btn-primary" style={{ padding: '8px 20px', fontSize: '0.85rem' }}>Sign Up</Link>
-                    </div>
-                )}
+                {/* Auth buttons removed since auth is not set up */}
             </div>
 
             {/* Mobile toggle */}

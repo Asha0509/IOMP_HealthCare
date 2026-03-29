@@ -59,9 +59,7 @@ export default function Landing() {
                         <Link to="/triage" className="btn btn-primary" style={{ padding: '16px 36px', fontSize: '1rem' }}>
                             Start Triage <ChevronRight size={18} />
                         </Link>
-                        <Link to="/register" className="btn btn-secondary" style={{ padding: '16px 36px', fontSize: '1rem' }}>
-                            Create Account
-                        </Link>
+
                     </div>
 
                     {/* Floating stats */}

@@ -72,10 +72,7 @@ export default function Register() {
                         </div>
                     </div>
 
-                    <button className="btn btn-primary" type="submit" disabled={loading}
-                        style={{ width: '100%', justifyContent: 'center', marginTop: 8, padding: '14px' }}>
-                        {loading ? <><span className="spinner" />Creating account...</> : 'Create Account'}
-                    </button>
+                    {/* Create Account button removed */}
                 </form>
 
                 <p style={{ textAlign: 'center', marginTop: 24, fontSize: '0.88rem', color: 'var(--text-muted)' }}>

@@ -78,6 +78,8 @@ Classification guidelines:
 - Urgent: Needs medical attention within 24 hours, but not immediately life-threatening
 - Emergency: Potentially life-threatening, needs immediate medical attention
 
+IMPORTANT: If the provided information is complete, consistent, and clearly matches a single triage category, set the confidence to 0.85 or higher for that label. Only use lower confidence if the data is ambiguous or conflicting. Be decisive when the case is clear-cut.
+
 Be conservative but not alarmist. Most common symptoms without severe indicators should be HomeCare.
 Consider that many patients report symptoms that resolve on their own.
 Only recommend Emergency for truly concerning presentations with multiple warning signs.
@@ -165,16 +167,16 @@ def _simple_heuristic_classify(
     
     if score >= 5:
         label = "Emergency"
-        probs = {"HomeCare": 0.1, "Urgent": 0.2, "Emergency": 0.7}
-        conf = 0.7
+        probs = {"HomeCare": 0.05, "Urgent": 0.05, "Emergency": 0.9}
+        conf = 0.9
     elif score >= 2:
         label = "Urgent"
-        probs = {"HomeCare": 0.2, "Urgent": 0.6, "Emergency": 0.2}
-        conf = 0.6
+        probs = {"HomeCare": 0.1, "Urgent": 0.8, "Emergency": 0.1}
+        conf = 0.8
     else:
         label = "HomeCare"
-        probs = {"HomeCare": 0.7, "Urgent": 0.25, "Emergency": 0.05}
-        conf = 0.7
+        probs = {"HomeCare": 0.85, "Urgent": 0.1, "Emergency": 0.05}
+        conf = 0.85
     
     symptom_text = ", ".join(s.replace("_", " ") for s in symptoms[:3]) or "reported symptoms"
     
