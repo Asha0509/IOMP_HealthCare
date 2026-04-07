@@ -121,6 +121,18 @@ async def start_triage(
     next_q = await adaptive_engine.get_next_question_async(symptoms, {}, 0, data.chief_complaint)
     progress = adaptive_engine.compute_progress(symptoms, {}, data.chief_complaint)
 
+    # If symptoms were extracted but no follow-up is needed, finalize immediately.
+    if symptoms and (not next_q or progress >= 100):
+        await _run_classification(session_id, context, db)
+        await close_session(session_id)
+        return TriageSessionState(
+            session_id=session_id,
+            status="completed",
+            progress_percent=100,
+            extracted_symptoms=symptoms,
+            message="Assessment complete. Preparing your personalized triage result...",
+        )
+
     current_question = None
     if next_q:
         current_question = QuestionResponse(
@@ -225,6 +237,12 @@ async def get_result(session_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Result not found. Session may still be active.")
 
     shap_feats = result.shap_values or []
+    # Filter or transform shap_feats to match expected schema
+    valid_shap_feats = []
+    for feat in shap_feats:
+        if isinstance(feat, dict) and all(k in feat for k in ("feature", "value", "contribution", "direction")):
+            valid_shap_feats.append(feat)
+    # If none are valid, return empty list
     return TriageResult(
         session_id=session_id,
         triage_label=result.triage_label,
@@ -235,9 +253,10 @@ async def get_result(session_id: str, db: AsyncSession = Depends(get_db)):
         explanation_text=result.explanation_text or "",
         recommended_action=result.recommended_action or "",
         diseases_considered=result.diseases_considered or [],
-        shap_features=shap_feats,
+        shap_features=valid_shap_feats,
         remedies=result.remedies or [],
         nutrition_tips=result.nutrition_tips or [],
+        medications=result.medications or [],
         crisis_response=result.crisis_response,
     )
 
@@ -294,6 +313,7 @@ async def _save_guardrail_result(session_id, guardrail, symptoms, db, language):
         diseases_considered=[],
         remedies=rn.get("remedies", []),
         nutrition_tips=rn.get("nutrition_tips", []),
+        medications=[],
         crisis_response=is_crisis,
     ))
 
@@ -319,6 +339,11 @@ async def _run_classification(session_id, context, db):
         gender=context.get("patient_gender"),
     )
 
+    result_diseases = clf_result.get("diseases_considered") or diseases
+    result_remedies = clf_result.get("remedies") or rn.get("remedies", [])
+    result_nutrition = clf_result.get("nutrition_tips") or rn.get("nutrition_tips", [])
+    result_medications = clf_result.get("medications") or []
+
     db.add(TriageResultModel(
         id=str(uuid.uuid4()),
         session_id=session_id,
@@ -329,9 +354,10 @@ async def _run_classification(session_id, context, db):
         shap_values=clf_result.get("shap_features", []),
         explanation_text=clf_result["explanation_text"],
         recommended_action=clf_result["recommended_action"],
-        diseases_considered=diseases,
-        remedies=rn.get("remedies", []),
-        nutrition_tips=rn.get("nutrition_tips", []),
+        diseases_considered=result_diseases,
+        remedies=result_remedies,
+        nutrition_tips=result_nutrition,
+        medications=result_medications,
         crisis_response=False,
     ))
     return clf_result

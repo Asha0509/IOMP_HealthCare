@@ -1,6 +1,7 @@
-from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, Text, JSON
+from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, Text, JSON, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.exc import OperationalError
 from datetime import datetime
 import uuid
 from core.config import settings
@@ -10,17 +11,51 @@ from core.config import settings
 Base = declarative_base()
 engine = create_async_engine(settings.DATABASE_URL, echo=settings.DEBUG, pool_pre_ping=True)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+_schema_checked = False
+
+
+async def _ensure_runtime_schema(session: AsyncSession) -> None:
+    global _schema_checked
+    if _schema_checked:
+        return
+
+    dialect = session.bind.dialect.name if session.bind else ""
+    try:
+        if dialect == "sqlite":
+            table_info = await session.execute(text("PRAGMA table_info(triage_results)"))
+            columns = {row[1] for row in table_info.fetchall()}
+            if "medications" not in columns:
+                await session.execute(text("ALTER TABLE triage_results ADD COLUMN medications JSON"))
+                await session.commit()
+        elif dialect == "postgresql":
+            await session.execute(text("ALTER TABLE triage_results ADD COLUMN IF NOT EXISTS medications JSONB"))
+            await session.commit()
+    except OperationalError:
+        # Column may already exist in concurrent scenarios.
+        await session.rollback()
+    finally:
+        _schema_checked = True
 
 
 async def init_db():
     """Create all tables."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Backward-compatible schema patch for existing databases.
+        dialect = conn.dialect.name
+        if dialect == "sqlite":
+            table_info = await conn.execute(text("PRAGMA table_info(triage_results)"))
+            columns = {row[1] for row in table_info.fetchall()}
+            if "medications" not in columns:
+                await conn.execute(text("ALTER TABLE triage_results ADD COLUMN medications JSON"))
+        elif dialect == "postgresql":
+            await conn.execute(text("ALTER TABLE triage_results ADD COLUMN IF NOT EXISTS medications JSONB"))
 
 
 async def get_db():
     async with AsyncSessionLocal() as session:
         try:
+            await _ensure_runtime_schema(session)
             yield session
             await session.commit()
         except Exception:
@@ -75,6 +110,7 @@ class TriageResultModel(Base):
     diseases_considered = Column(JSON, default=[])  # JSON instead of ARRAY
     remedies = Column(JSON, default=[])  # JSON instead of ARRAY
     nutrition_tips = Column(JSON, default=[])  # JSON instead of ARRAY
+    medications = Column(JSON, default=[])
     crisis_response = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 

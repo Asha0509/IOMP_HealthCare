@@ -14,10 +14,10 @@ Performs:
 import re
 import json
 import os
-import httpx
 from typing import List, Dict, Optional, Tuple
 from core.config import settings
 from core.logging import app_logger
+from services.llm_client import generate_json_with_fallback
 
 # ── Symptom synonym map (built from knowledge graph) ──
 SYMPTOM_KEYWORDS: Dict[str, str] = {}
@@ -63,9 +63,7 @@ def _get_valid_symptoms() -> List[str]:
 
 # ── Gemini API for symptom extraction ──
 def extract_symptoms_gemini(text: str) -> List[str]:
-    """Use Gemini API to extract symptoms from text."""
-    if not settings.GEMINI_API_KEY:
-        return []
+    """Use LLM to extract symptoms (Gemini primary, NVIDIA NIM fallback)."""
     
     valid_symptoms = _get_valid_symptoms()
     prompt = f"""Extract medical symptoms from this text. Return ONLY a JSON array of symptom names.
@@ -79,35 +77,19 @@ Text: "{text}"
 Return ONLY a JSON array like ["fever", "headache"]. No explanation."""
 
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={settings.GEMINI_API_KEY}"
-        response = httpx.post(
-            url,
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.1, "maxOutputTokens": 200}
-            },
-            timeout=10.0
+        parsed, provider = generate_json_with_fallback(
+            prompt=prompt,
+            default=[],
+            temperature=0.1,
+            max_tokens=220,
         )
-        
-        if response.status_code == 200:
-            data = response.json()
-            result_text = data["candidates"][0]["content"]["parts"][0]["text"]
-            # Parse JSON from response
-            result_text = result_text.strip()
-            if result_text.startswith("```"):
-                result_text = result_text.split("```")[1]
-                if result_text.startswith("json"):
-                    result_text = result_text[4:]
-            symptoms = json.loads(result_text.strip())
-            # Validate against known symptoms
-            valid = [s for s in symptoms if s in valid_symptoms]
-            app_logger.info(f"Gemini extracted symptoms: {valid}")
-            return valid
-        else:
-            app_logger.warning(f"Gemini API error: {response.status_code}")
-            return []
+        if isinstance(parsed, list):
+            valid = [s for s in parsed if s in valid_symptoms]
+            if valid:
+                app_logger.info(f"{provider or 'llm'} extracted symptoms: {valid}")
+                return valid
     except Exception as e:
-        app_logger.warning(f"Gemini extraction failed: {e}")
+        app_logger.warning(f"LLM symptom extraction failed: {e}")
         return []
 
 

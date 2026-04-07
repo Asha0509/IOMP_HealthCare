@@ -6,6 +6,7 @@ from typing import Optional, List
 from schemas.models import HospitalRecommendation, Hospital, TriageLabel
 from core.config import settings
 from core.logging import app_logger
+from services.llm_client import generate_json_with_fallback
 
 router = APIRouter(prefix="/api/hospitals", tags=["Hospitals"])
 
@@ -59,7 +60,7 @@ async def get_hospitals_from_gemini(
     lon: Optional[float],
     symptom: Optional[str]
 ) -> List[Hospital]:
-    """Use Gemini to get hospital recommendations based on location."""
+    """Use LLM (Gemini primary, NIM fallback) for location-aware hospital recommendations."""
     
     # Get actual location name from coordinates
     location_name = ""
@@ -86,6 +87,7 @@ IMPORTANT: Only suggest hospitals that actually exist in {location_name or 'Hyde
 
 Urgency level: {urgency}
 Care type needed: {care_type}
+Clinical focus: prioritize facilities that are most suitable for the urgency and symptom profile.
 
 Return a JSON array with exactly 3 hospitals. Each hospital should have:
 - name: Real hospital name that exists in this city
@@ -98,37 +100,29 @@ Return a JSON array with exactly 3 hospitals. Each hospital should have:
 Return ONLY the JSON array, no other text."""
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={settings.GEMINI_API_KEY}",
-                json={"contents": [{"parts": [{"text": prompt}]}]}
-            )
-            resp.raise_for_status()
-            result = resp.json()
-            text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
-            
-            # Parse JSON from response
-            if text.startswith("```"):
-                text = text.split("```")[1]
-                if text.startswith("json"):
-                    text = text[4:]
-                text = text.strip()
-            
-            hospitals_data = json.loads(text)
-            hospitals = []
-            for h in hospitals_data:
-                hospitals.append(Hospital(
-                    name=h.get("name", "Unknown Hospital"),
-                    address=h.get("address", ""),
-                    distance_km=float(h.get("distance_km", 0)),
-                    phone=h.get("phone", ""),
-                    type=h.get("type", "clinic"),
-                    maps_url=h.get("maps_url", "https://maps.google.com")
-                ))
-            return hospitals
-            
+        hospitals_data, provider = generate_json_with_fallback(
+            prompt=prompt,
+            default=[],
+            temperature=0.2,
+            max_tokens=900,
+        )
+        if not isinstance(hospitals_data, list) or not hospitals_data:
+            return get_fallback_hospitals(urgency)
+
+        hospitals = []
+        for h in hospitals_data[:3]:
+            hospitals.append(Hospital(
+                name=h.get("name", "Unknown Hospital"),
+                address=h.get("address", ""),
+                distance_km=float(h.get("distance_km", 0) or 0),
+                phone=h.get("phone", ""),
+                type=h.get("type", "clinic"),
+                maps_url=h.get("maps_url", "https://maps.google.com")
+            ))
+        app_logger.info(f"Hospital recommendations generated via {provider or 'llm'}")
+        return hospitals
     except Exception as e:
-        app_logger.warning(f"Gemini hospital lookup failed: {e}")
+        app_logger.warning(f"LLM hospital lookup failed: {e}")
         return get_fallback_hospitals(urgency)
 
 
@@ -136,22 +130,22 @@ def get_fallback_hospitals(urgency: str) -> List[Hospital]:
     """Return fallback hospitals if Gemini fails."""
     fallback = {
         "Emergency": [
-            Hospital(name="KIMS Hospital", address="Minister Road, Secunderabad, Hyderabad", distance_km=1.5,
+            Hospital(name="LandMark Hospitals", address="Nizampet, Hyderabad", distance_km=1.5,
                      phone="040-44885000", type="emergency",
-                     maps_url="https://maps.google.com/?q=KIMS+Hospital+Hyderabad"),
-            Hospital(name="Apollo Hospitals Jubilee Hills", address="Jubilee Hills, Hyderabad", distance_km=3.0,
+                     maps_url="https://www.google.com/maps?sca_esv=a7c356437a2f7860&output=search&q=landmark+hospital&source=lnms&fbs=ADc_l-aN0CWEZBOHjofHoaMMDiKpaEWjvZ2Py1XXV8d8KvlI3kj_s5Jds98_ubVRf0unUVuttyzNArKNIU5GZzx4Y5djOSi5iUTuvdmR-KzdLKnPc8J97gJtmVeaOWsKOxlqo4TcVZ7ft1dMtClAqeNC9y2mJ8P_pAdCMwFy46j5j2tvTqUS2_V68iNK_vv2E5tQyCDxasV3OS5zCGOxACnsQOGmKPQxbA&entry=mc&ved=1t:200715&ictx=111"),
+            Hospital(name="Nexgen Hospital", address="Bachupally, Hyderabad", distance_km=3.0,
                      phone="040-23607777", type="emergency",
-                     maps_url="https://maps.google.com/?q=Apollo+Hospitals+Jubilee+Hills+Hyderabad"),
+                     maps_url="https://www.google.com/maps/place/NextGen+Hospitals/@17.4892069,78.3776512,15z/data=!3m1!4b1!4m6!3m5!1s0x3bcb916e5cb65dfb:0x8a5b7a7934adf5a9!8m2!3d17.4891873!4d78.3961053!16s%2Fg%2F11spvwvkb9?entry=ttu&g_ep=EgoyMDI2MDMyNC4wIKXMDSoASAFQAw%3D%3D"),
         ],
         "Urgent": [
-            Hospital(name="Care Hospitals Banjara Hills", address="Banjara Hills, Hyderabad", distance_km=2.0,
+            Hospital(name="Sri Sri Holistic Hospitals", address="Nizampet, Hyderabad", distance_km=2.0,
                      phone="040-30418888", type="specialist",
-                     maps_url="https://maps.google.com/?q=Care+Hospitals+Banjara+Hills+Hyderabad"),
+                     maps_url="https://www.google.com/maps/place/Sri+Sri+Holistic%C2%AE%EF%B8%8F+Hospitals/@17.5022314,78.3863263,17z/data=!3m1!4b1!4m6!3m5!1s0x3bcb9a090b3018fd:0x7a60b593fe53fde9!8m2!3d17.5022263!4d78.3889012!16s%2Fg%2F11x9gsqf3?entry=ttu&g_ep=EgoyMDI2MDMyNC4wIKXMDSoASAFQAw%3D%3D"),
         ],
         "HomeCare": [
-            Hospital(name="MedPlus Pharmacy", address="Ameerpet, Hyderabad", distance_km=0.5,
+            Hospital(name="MedPlus Pharmacy", address="Bachupally, Hyderabad", distance_km=0.5,
                      phone="040-67006700", type="clinic",
-                     maps_url="https://maps.google.com/?q=MedPlus+Ameerpet+Hyderabad"),
+                     maps_url="https://www.google.com/maps/dir//G%2F1,+Plot+No+84,+MedPlus+Bachupally+Pharmacy+%26+Lab,+Hill+Side,+Rangareddy,+Sy+No+272+To+275+%26+277,+Medchal+Malkajgiri,+Bachupally,+Hyderabad,+Telangana+500118/data=!4m6!4m5!1m1!4e2!1m2!1m1!1s0x3bcb8dee2b938045:0x65ebdaaf778c3048?sa=X&ved=1t:57443&ictx=111"),
             Hospital(name="Practo Teleconsultation", address="Online", distance_km=0.0,
                      phone="1800-123-8080", type="clinic",
                      maps_url="https://practo.com"),

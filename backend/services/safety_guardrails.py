@@ -6,10 +6,11 @@ Only intervenes for true emergencies (self-harm, life-threatening conditions).
 """
 
 import json
-import httpx
+import re
 from typing import List, Dict, Optional, Tuple
 from core.config import settings
 from core.logging import app_logger
+from services.llm_client import generate_json_with_fallback, has_any_provider
 
 CRISIS_HOTLINES = {
     "en": {
@@ -30,9 +31,32 @@ CRISIS_HOTLINES = {
 }
 
 
+def _check_hardcoded_medical_emergency(text: str) -> Optional[str]:
+    """
+    Deterministic medical emergency trigger for severe cardiac-sounding complaints.
+    Returns a human-readable reason if matched.
+    """
+    if not text:
+        return None
+
+    normalized = " ".join(text.lower().strip().split())
+
+    has_intensity = bool(re.search(r"\b(intense|severe|extreme|crushing|unbearable|worst)\b", normalized))
+    has_heart_ache = bool(re.search(r"\bheart[\s-]?ache\b", normalized))
+    has_chest_pain = bool(re.search(r"\bchest\s+pain\b", normalized))
+
+    if has_intensity and (has_heart_ache or has_chest_pain):
+        return "Potential cardiac emergency detected from severe chest/heart pain wording"
+
+    if "intense heart ache" in normalized or "intense heartache" in normalized:
+        return "Potential cardiac emergency detected from intense heart ache wording"
+
+    return None
+
+
 def check_crisis_gemini(text: str, intent: str, symptoms: List[str]) -> Optional[Dict]:
     """Use Gemini to intelligently detect crisis situations."""
-    if not settings.GEMINI_API_KEY:
+    if not has_any_provider():
         # Fallback to keyword detection
         crisis_keywords = ["suicide", "kill myself", "want to die", "end my life", "self harm"]
         text_lower = text.lower()
@@ -58,27 +82,14 @@ Be careful not to over-flag. Only return is_crisis=true for genuine self-harm or
 Medical symptoms (even severe ones) should NOT be flagged as crisis - that's handled separately."""
 
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={settings.GEMINI_API_KEY}"
-        response = httpx.post(
-            url,
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.1, "maxOutputTokens": 100}
-            },
-            timeout=10.0
+        result, _provider = generate_json_with_fallback(
+            prompt=prompt,
+            default={"is_crisis": False},
+            temperature=0.1,
+            max_tokens=120,
         )
-        
-        if response.status_code == 200:
-            data = response.json()
-            result_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            if result_text.startswith("```"):
-                result_text = result_text.split("```")[1]
-                if result_text.startswith("json"):
-                    result_text = result_text[4:]
-            
-            result = json.loads(result_text.strip())
-            if result.get("is_crisis"):
-                return result
+        if isinstance(result, dict) and result.get("is_crisis"):
+            return result
         return None
     except Exception as e:
         app_logger.warning(f"Crisis check failed: {e}")
@@ -99,6 +110,17 @@ def apply_guardrails(
     Check for crisis situations only.
     Medical triage is handled by the classifier, not guardrails.
     """
+    # Hard-stop for explicit severe heart/chest pain wording.
+    medical_emergency_reason = _check_hardcoded_medical_emergency(chief_complaint)
+    if medical_emergency_reason:
+        return {
+            "is_crisis": False,
+            "triage_label": "Emergency",
+            "confidence": 1.0,
+            "reason": medical_emergency_reason,
+            "action": "Call local emergency services immediately and go to the nearest emergency room now.",
+        }, "hardcoded_medical_emergency"
+
     # Only check for mental health crisis - let the classifier handle medical triage
     crisis = check_crisis_gemini(chief_complaint, intent, symptoms)
     

@@ -8,20 +8,17 @@ Test Plan:
 2. Question Filtering: Test if follow-up questions are relevant, non-redundant, and context-aware.
 3. End-to-End Triage: Simulate a full triage session and check for clinical reasoning and flow.
 4. Efficiency: Measure response time for question generation and triage classification.
-
 Each test prints the scenario, expected behavior, and actual results.
 """
+
 import asyncio
 import pytest
 import time
 from httpx import AsyncClient
-
 import sys
 sys.path.insert(0, './backend')
 from backend.main import app
-
 API_URL = "http://localhost:8000/api/triage"
-
 @pytest.mark.asyncio
 async def test_symptom_extraction():
     print("\nTest 1: Symptom Extraction")
@@ -106,8 +103,37 @@ async def test_efficiency():
         print("Response Time (s):", elapsed)
         assert elapsed < 2.5  # Should be fast for local dev
 
+
+@pytest.mark.asyncio
+async def test_hardcoded_intense_heart_ache_emergency_short_circuit():
+    print("\nTest 5: Hardcoded emergency short-circuit (intense heart ache)")
+    chief_complaint = "I have intense heart ache since this morning"
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        start_resp = await ac.post(f"{API_URL}/start", json={
+            "chief_complaint": chief_complaint,
+            "patient_age": 49,
+            "patient_gender": "male",
+            "language": "en"
+        })
+        start_data = start_resp.json()
+
+        print("Input:", chief_complaint)
+        print("Start status:", start_data.get("status"))
+        print("Guardrail message:", start_data.get("message"))
+
+        assert start_data.get("status") == "completed"
+        assert "emergency" in (start_data.get("message") or "").lower() or "cardiac" in (start_data.get("message") or "").lower()
+
+        session_id = start_data.get("session_id")
+        result_resp = await ac.get(f"{API_URL}/result/{session_id}")
+        result_data = result_resp.json()
+
+        print("Result triage label:", result_data.get("triage_label"))
+        assert result_data.get("triage_label") == "Emergency"
+
 if __name__ == "__main__":
     asyncio.run(test_symptom_extraction())
     asyncio.run(test_question_filtering())
     asyncio.run(test_end_to_end_triage())
     asyncio.run(test_efficiency())
+    asyncio.run(test_hardcoded_intense_heart_ache_emergency_short_circuit())

@@ -7,10 +7,9 @@ Risk Classifier + Explainability Module
 """
 
 import json
-import httpx
 from typing import List, Dict, Optional
-from core.config import settings
 from core.logging import app_logger
+from services.llm_client import generate_json_with_fallback
 
 LABELS = ["HomeCare", "Urgent", "Emergency"]
 
@@ -25,9 +24,7 @@ def classify_triage_gemini(
     answers: Dict[str, str],
     chief_complaint: str = "",
 ) -> Optional[Dict]:
-    """Use Gemini API for intelligent triage classification."""
-    if not settings.GEMINI_API_KEY:
-        return None
+    """Use LLM classification (Gemini primary, NIM fallback) with rich clinical output."""
     
     # Build context for Gemini
     symptom_text = ", ".join(s.replace("_", " ") for s in symptoms)
@@ -51,7 +48,7 @@ def classify_triage_gemini(
         else:
             patient_info.append(f"Duration: {int(duration_hours/24)} days")
     
-    prompt = f"""You are a medical triage AI assistant. Analyze the following patient information and provide a triage recommendation.
+    prompt = f"""You are a senior emergency triage clinician AI. Analyze this case and return structured JSON.
 
 Chief Complaint: {chief_complaint or 'Not specified'}
 
@@ -63,14 +60,24 @@ Patient Information:
 Follow-up Q&A:
 {answers_text if answers_text else 'No follow-up questions answered yet'}
 
-Based on this information, provide a triage classification. You must respond in this exact JSON format:
+You must explicitly account for:
+- age-adjusted risk and frailty
+- symptom duration progression (acute vs prolonged)
+- symptom combinations and severity
+- comorbidity amplification (if present)
+
+Return ONLY valid JSON in this exact structure:
 {{
     "triage_label": "HomeCare" or "Urgent" or "Emergency",
     "confidence": 0.0 to 1.0,
     "probabilities": {{"HomeCare": 0.0-1.0, "Urgent": 0.0-1.0, "Emergency": 0.0-1.0}},
     "explanation": "2-3 sentence explanation of your reasoning",
     "recommended_action": "Specific action the patient should take",
-    "key_factors": ["factor1", "factor2", "factor3"]
+    "key_factors": ["factor1", "factor2", "factor3"],
+    "diseases_considered": ["condition1", "condition2", "condition3"],
+    "remedies": ["actionable non-drug home-care step 1", "..."],
+    "nutrition_tips": ["diet tip 1", "..."],
+    "medications": ["OTC or first-line medication guidance with brief caution"]
 }}
 
 Classification guidelines:
@@ -78,59 +85,53 @@ Classification guidelines:
 - Urgent: Needs medical attention within 24 hours, but not immediately life-threatening
 - Emergency: Potentially life-threatening, needs immediate medical attention
 
-IMPORTANT: If the provided information is complete, consistent, and clearly matches a single triage category, set the confidence to 0.85 or higher for that label. Only use lower confidence if the data is ambiguous or conflicting. Be decisive when the case is clear-cut.
+For confidence scoring:
+- Increase confidence when age, duration, and symptom pattern clearly align with one urgency class.
+- Lower confidence only when data is conflicting or missing.
 
 Be conservative but not alarmist. Most common symptoms without severe indicators should be HomeCare.
 Consider that many patients report symptoms that resolve on their own.
 Only recommend Emergency for truly concerning presentations with multiple warning signs.
 
+Medication safety constraints:
+- Do not prescribe controlled drugs.
+- Prefer OTC categories for HomeCare.
+- For Urgent/Emergency, include "seek clinician evaluation before medication" when appropriate.
+
 Respond ONLY with the JSON object, no additional text."""
 
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={settings.GEMINI_API_KEY}"
-        response = httpx.post(
-            url,
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 500}
-            },
-            timeout=15.0
+        result, provider = generate_json_with_fallback(
+            prompt=prompt,
+            default={},
+            temperature=0.2,
+            max_tokens=1200,
         )
-        
-        if response.status_code == 200:
-            data = response.json()
-            result_text = data["candidates"][0]["content"]["parts"][0]["text"]
-            
-            # Parse JSON from response
-            result_text = result_text.strip()
-            if result_text.startswith("```"):
-                result_text = result_text.split("```")[1]
-                if result_text.startswith("json"):
-                    result_text = result_text[4:]
-            
-            result = json.loads(result_text.strip())
-            
-            # Validate and normalize response
-            label = result.get("triage_label", "HomeCare")
-            if label not in LABELS:
-                label = "HomeCare"
-            
-            app_logger.info(f"Gemini triage: {label} with confidence {result.get('confidence', 0.7)}")
-            
-            return {
-                "triage_label": label,
-                "confidence": float(result.get("confidence", 0.7)),
-                "probabilities": result.get("probabilities", {"HomeCare": 0.7, "Urgent": 0.2, "Emergency": 0.1}),
-                "explanation_text": result.get("explanation", ""),
-                "recommended_action": result.get("recommended_action", ""),
-                "shap_features": [{"feature": f, "human_label": f} for f in result.get("key_factors", [])],
-                "model_used": "gemini",
-            }
-        else:
-            app_logger.warning(f"Gemini API error: {response.status_code}")
+
+        if not isinstance(result, dict) or not result:
             return None
+
+        label = result.get("triage_label", "HomeCare")
+        if label not in LABELS:
+            label = "HomeCare"
+
+        app_logger.info(f"LLM triage ({provider or 'none'}): {label} with confidence {result.get('confidence', 0.7)}")
+
+        return {
+            "triage_label": label,
+            "confidence": float(result.get("confidence", 0.7)),
+            "probabilities": result.get("probabilities", {"HomeCare": 0.7, "Urgent": 0.2, "Emergency": 0.1}),
+            "explanation_text": result.get("explanation", ""),
+            "recommended_action": result.get("recommended_action", ""),
+            "shap_features": [{"feature": f, "human_label": f} for f in result.get("key_factors", [])],
+            "diseases_considered": result.get("diseases_considered", []),
+            "remedies": result.get("remedies", []),
+            "nutrition_tips": result.get("nutrition_tips", []),
+            "medications": result.get("medications", []),
+            "model_used": provider or "unknown",
+        }
     except Exception as e:
-        app_logger.warning(f"Gemini triage failed: {e}")
+        app_logger.warning(f"LLM triage failed: {e}")
         return None
 
 
@@ -197,6 +198,10 @@ def _simple_heuristic_classify(
         "explanation_text": explanation,
         "recommended_action": action,
         "shap_features": [{"feature": r, "human_label": r} for r in reasons[:3]],
+        "diseases_considered": [],
+        "remedies": [],
+        "nutrition_tips": [],
+        "medications": [],
         "model_used": "heuristic",
     }
 

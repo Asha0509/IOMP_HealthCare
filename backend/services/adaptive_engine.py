@@ -12,10 +12,10 @@ This is the Adaptive Questioning Engine from the system architecture.
 
 import json
 import os
-import httpx
 from typing import List, Dict, Optional
 from core.config import settings
 from core.logging import app_logger
+from services.llm_client import generate_json_with_fallback, has_any_provider
 
 _kg: Optional[Dict] = None
 
@@ -39,7 +39,7 @@ async def filter_questions_with_gemini(
     Use Gemini to filter out questions that are redundant or already answered
     based on the user's chief complaint and previous answers.
     """
-    if not questions or not settings.GEMINI_API_KEY:
+    if not questions or not has_any_provider():
         return questions
 
     # Build context of what's already known
@@ -70,30 +70,20 @@ Return a JSON array of question IDs to KEEP (not skip). Example: ["cp_duration",
 Only return the JSON array, nothing else."""
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={settings.GEMINI_API_KEY}",
-                json={"contents": [{"parts": [{"text": prompt}]}]}
-            )
-            resp.raise_for_status()
-            result = resp.json()
-            text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
-            
-            # Parse JSON array from response
-            if text.startswith("```"):
-                text = text.split("```")[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            
-            keep_ids = json.loads(text)
-            
-            # Filter questions to only keep the ones Gemini approved
-            filtered = [q for q in questions if q["id"] in keep_ids]
-            app_logger.info(f"Gemini filtered {len(questions)} questions to {len(filtered)}")
-            return filtered
-            
+        keep_ids, provider = generate_json_with_fallback(
+            prompt=prompt,
+            default=[],
+            temperature=0.1,
+            max_tokens=260,
+        )
+        if not isinstance(keep_ids, list) or not keep_ids:
+            return questions
+
+        filtered = [q for q in questions if q["id"] in keep_ids]
+        app_logger.info(f"{provider or 'llm'} filtered {len(questions)} questions to {len(filtered)}")
+        return filtered
     except Exception as e:
-        app_logger.warning(f"Gemini question filtering failed: {e}, using original questions")
+        app_logger.warning(f"LLM question filtering failed: {e}, using original questions")
         return questions
 
 

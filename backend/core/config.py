@@ -26,7 +26,11 @@ class Settings(BaseSettings):
 
     # External APIs
     GOOGLE_MAPS_API_KEY: str = ""
-    GEMINI_API_KEY: str = ""  # Set via environment variable or .env file
+    GEMINI_API_KEY: str = ""  # Backward compatibility for existing env files
+    GROQ_API_KEY: str = ""  # Primary LLM provider key (Groq)
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    NVIDIA_NIM_API_KEY: str = ""  # Optional fallback LLM provider
+    NVIDIA_NIM_MODEL: str = "meta/llama-3.1-70b-instruct"
 
     # Data paths - use parent directory since data is at project root
     DATA_DIR: str = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")

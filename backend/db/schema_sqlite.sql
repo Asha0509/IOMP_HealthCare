@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS triage_results (
     shap_values TEXT, -- JSON string
     remedies TEXT, -- JSON string
     nutrition_tips TEXT, -- JSON string
+    medications TEXT, -- JSON string
     crisis_response BOOLEAN,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );

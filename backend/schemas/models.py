@@ -98,7 +98,6 @@ class SHAPFeature(BaseModel):
     direction: str  # "increases_risk" | "decreases_risk"
     human_label: str
 
-
 class TriageResult(BaseModel):
     session_id: str
     triage_label: TriageLabel
@@ -112,9 +111,9 @@ class TriageResult(BaseModel):
     shap_features: List[SHAPFeature] = []
     remedies: List[str] = []
     nutrition_tips: List[str] = []
+    medications: List[str] = []
     crisis_response: bool = False
     crisis_message: Optional[str] = None
-
 
 # ── NLP Schemas ──
 class ExtractedEntity(BaseModel):

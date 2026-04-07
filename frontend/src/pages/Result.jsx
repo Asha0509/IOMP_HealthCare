@@ -6,7 +6,7 @@ import {
 } from 'recharts'
 import {
     AlertTriangle, CheckCircle, Clock, Phone, MapPin,
-    Heart, Salad, ArrowLeft, ExternalLink, Info, Database
+    Heart, Salad, ArrowLeft, ExternalLink, Info, Database, Pill
 } from 'lucide-react'
 
 // Dataset Model Info
@@ -337,6 +337,24 @@ export default function Result() {
                                     <li key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: '0.88rem' }}>
                                         <span style={{ color: 'var(--accent-teal)', flexShrink: 0 }}>🥗</span>
                                         <span style={{ color: 'var(--text-secondary)' }}>{n}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    {/* ── Medications ── */}
+                    {result.medications?.length > 0 && (
+                        <div className="glass-card" style={{ padding: 28 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                                <Pill size={18} color="var(--urgent)" />
+                                <h3 style={{ fontSize: '1rem' }}>Medication Guidance</h3>
+                            </div>
+                            <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                {result.medications.map((m, i) => (
+                                    <li key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: '0.88rem' }}>
+                                        <span style={{ color: 'var(--urgent)', flexShrink: 0 }}>💊</span>
+                                        <span style={{ color: 'var(--text-secondary)' }}>{m}</span>
                                     </li>
                                 ))}
                             </ul>

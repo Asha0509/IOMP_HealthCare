@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS triage_results (
     diseases_considered TEXT[],
     remedies TEXT[],
     nutrition_tips TEXT[],
+    medications TEXT[],
     crisis_response BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
